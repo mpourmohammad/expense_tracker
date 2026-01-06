@@ -1,0 +1,2 @@
+$env:PATH += ";C:\ffmpeg\bin"
+python spiral_kerman.py
