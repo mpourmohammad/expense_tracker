@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 import matplotlib as mpl
 from matplotlib import font_manager
+from mpl_toolkits.mplot3d import Axes3D
 
 # ---------- PREMIUM FONT SETUP ----------
 def set_english_font():
@@ -17,14 +18,11 @@ def set_english_font():
 
 set_english_font()
 
-# Smooth, elegant lines
-mpl.rcParams["path.sketch"] = (0.6, 80, 1.2)
-
 # ---------- SETTINGS ----------
 FPS = 30
-SIZE_PX = 480
+SIZE_PX = 720
 DPI = 200
-OUT_MP4 = "spiral_kerman_clockwise.mp4"
+OUT_MP4 = "spiral_3d_transformation.mp4"
 TITLE_TEXT = "Kerman Branch"
 SUBTITLE_TEXT = "Daily Performance Analysis"
 
@@ -51,7 +49,7 @@ if n == 0:
 
 # Scale settings
 PCT_MAX = 22.0
-r_small, r_big = 0.22, 0.95
+r_small, r_big = 0.35, 1.1
 r = r_small + np.clip(vals / PCT_MAX, 0, 1) * (r_big - r_small)
 
 # Enhanced color palette
@@ -67,212 +65,237 @@ def pct_color(v):
 def lerp(a, b, t):
     return a + (b - a) * t
 
+def ease_in_out(t):
+    """Smooth easing function"""
+    return t * t * (3 - 2 * t)
+
+def ease_out_cubic(t):
+    """Smoother easing for drawing"""
+    return 1 - pow(1 - t, 3)
+
+# ---------- ANIMATION PHASES ----------
+FRAMES_PER_CIRCLE = 40
+PHASE1_FRAMES = n * FRAMES_PER_CIRCLE
+PHASE2_FRAMES = 120
+PHASE3_FRAMES = 150
+HOLD_FRAMES = 90
+
+total_frames = PHASE1_FRAMES + PHASE2_FRAMES + PHASE3_FRAMES + HOLD_FRAMES
+
 # ---------- FIGURE SETUP ----------
 fig = plt.figure(figsize=(SIZE_PX / DPI, SIZE_PX / DPI), dpi=DPI)
 fig.patch.set_facecolor("#0a0a0a")
 
-ax = plt.subplot(111, projection="polar")
+ax = fig.add_subplot(111, projection='3d')
 ax.set_facecolor("#0a0a0a")
-ax.set_theta_direction(-1)
-ax.set_theta_offset(np.pi/2)
-
-ax.set_xticks([])
-ax.set_xticklabels([])
-ax.set_rlim(0.0, 1.20)
-ax.set_yticklabels([])
 ax.grid(False)
-ax.spines['polar'].set_visible(False)
+ax.set_xlim(-1.4, 1.4)
+ax.set_ylim(-1.4, 1.4)
+ax.set_zlim(0, n * 0.1)
 
-# Elegant guide rings
-tt = np.linspace(0, 2*np.pi, 800)
-for pct, alpha in [(5, 0.2), (10, 0.3), (15, 0.4), (20, 0.5)]:
-    rr = r_small + (pct / PCT_MAX) * (r_big - r_small)
-    ax.plot(tt, np.full_like(tt, rr), color="#2a2a2a", lw=1.0, alpha=alpha, zorder=1)
+# Hide axes
+ax.set_xticks([])
+ax.set_yticks([])
+ax.set_zticks([])
+ax.xaxis.pane.fill = False
+ax.yaxis.pane.fill = False
+ax.zaxis.pane.fill = False
+ax.xaxis.pane.set_edgecolor('none')
+ax.yaxis.pane.set_edgecolor('none')
+ax.zaxis.pane.set_edgecolor('none')
 
-# Center glow
-center_glow = plt.Circle((0, 0), 0.18, color="#1a1a1a", alpha=0.7, 
-                         transform=ax.transData._b, zorder=0)
-ax.add_patch(center_glow)
+# Initial view: top-down
+ax.view_init(elev=90, azim=-90)
 
-# Premium text styling - TITLE AT TOP
-title_text = ax.text(
-    0.5, 0.94, TITLE_TEXT,
-    transform=ax.transAxes,
-    ha="center", va="center",
-    color="#ffffff",
-    fontsize=14,
-    fontweight="bold",
-    alpha=0.95
-)
+# Text elements
+title_text = fig.text(0.5, 0.95, TITLE_TEXT, ha="center", va="center",
+                      color="#ffffff", fontsize=16, fontweight="bold", alpha=0.95)
+subtitle_text = fig.text(0.5, 0.91, SUBTITLE_TEXT, ha="center", va="center",
+                         color="#888888", fontsize=8, alpha=0.85)
+main_text = fig.text(0.5, 0.5, "", ha="center", va="center",
+                     color="#ffffff", fontsize=11, fontweight="normal", alpha=0.0)
+# تاریخ در زیر تصویر
+date_text = fig.text(0.5, 0.08, "", ha="center", va="center",
+                     color="#aaaaaa", fontsize=7, alpha=0.0)
 
-subtitle_text = ax.text(
-    0.5, 0.89, SUBTITLE_TEXT,
-    transform=ax.transAxes,
-    ha="center", va="center",
-    color="#888888",
-    fontsize=7,
-    alpha=0.85
-)
-
-# Large percentage in CENTER
-main_text = ax.text(
-    0.5, 0.52, f"{vals[0]:.2f}%",
-    transform=ax.transAxes,
-    ha="center", va="center",
-    color="#ffffff",
-    fontsize=20,
-    fontweight="bold",
-    alpha=0.95
-)
-
-# Status indicator
-status_text = ax.text(
-    0.5, 0.44, "EXCELLENT",
-    transform=ax.transAxes,
-    ha="center", va="center",
-    color="#35d555",
-    fontsize=8,
-    fontweight="bold",
-    alpha=0.9
-)
-
-# DATE AT BOTTOM
-date_text = ax.text(
-    0.5, 0.06, labels[0],
-    transform=ax.transAxes,
-    ha="center", va="center",
-    color="#aaaaaa",
-    fontsize=10,
-    alpha=0.9
-)
-
-# ---------- CLOCKWISE DRAWING ANIMATION ----------
-TRAIL = 8  # Keep fewer visible circles for cleaner look
-trail_lines = []
-glow_lines = []
-
-for _ in range(TRAIL):
-    # Main line
-    ln, = ax.plot([], [], lw=2.0, alpha=0.0, zorder=3)
-    ln.set_sketch_params(scale=0.6, length=80, randomness=1.2)
-    trail_lines.append(ln)
-    
-    # Glow effect
-    glow, = ax.plot([], [], lw=5.0, alpha=0.0, zorder=2)
-    glow.set_sketch_params(scale=0.6, length=80, randomness=1.2)
-    glow_lines.append(glow)
-
-FRAMES_PER_ITEM = 35  # Longer animation for smooth clockwise drawing
-HOLD_FRAMES = 8  # Hold complete circle briefly
-total_frames = n * (FRAMES_PER_ITEM + HOLD_FRAMES)
-
-def get_status(v):
-    if v >= 17.0:
-        return "CRITICAL", "#ff3344"
-    if v >= 9.0:
-        return "WARNING", "#ff9922"
-    if v >= 6.0:
-        return "MODERATE", "#ffcc66"
-    return "EXCELLENT", "#35d555"
+# Store line objects
+lines = []
+date_labels_3d = []
 
 def init():
-    for ln, glow in zip(trail_lines, glow_lines):
-        ln.set_data([], [])
-        ln.set_alpha(0.0)
-        glow.set_data([], [])
-        glow.set_alpha(0.0)
-    return trail_lines + glow_lines + [title_text, subtitle_text, main_text, date_text, status_text]
+    return lines + [title_text, subtitle_text, main_text, date_text]
 
 def update(frame):
-    item_frame = frame % (FRAMES_PER_ITEM + HOLD_FRAMES)
-    i = min(n - 1, frame // (FRAMES_PER_ITEM + HOLD_FRAMES))
+    # Clear previous lines
+    for line in lines:
+        line.remove()
+    lines.clear()
     
-    # Calculate drawing progress (0 to 1) for current circle
-    if item_frame < FRAMES_PER_ITEM:
-        draw_progress = item_frame / FRAMES_PER_ITEM
-        # Ease-out for smoother end
-        draw_progress = 1 - (1 - draw_progress) ** 2
+    for txt in date_labels_3d:
+        txt.remove()
+    date_labels_3d.clear()
+    
+    # Determine phase
+    if frame < PHASE1_FRAMES:
+        # PHASE 1: 2D spiral animation
+        circle_idx = frame // FRAMES_PER_CIRCLE
+        circle_progress = (frame % FRAMES_PER_CIRCLE) / FRAMES_PER_CIRCLE
+        circle_progress = ease_out_cubic(circle_progress)
+        
+        if circle_idx >= n:
+            circle_idx = n - 1
+            circle_progress = 1.0
+        
+        elev = 90
+        azim = -90
+        
+        # رسم دایره‌های قبلی
+        for i in range(circle_idx):
+            theta = np.linspace(0, 2*np.pi, 200)
+            x = r[i] * np.cos(theta)
+            y = r[i] * np.sin(theta)
+            z = np.zeros_like(theta)
+            
+            color = pct_color(vals[i])
+            alpha = 0.5 - (i * 0.015)
+            alpha = max(alpha, 0.15)
+            lw = 2.0
+            
+            line = ax.plot(x, y, z, color=color, alpha=alpha, lw=lw)[0]
+            lines.append(line)
+        
+        # رسم دایره فعلی
+        if circle_idx < n:
+            num_points = int(200 * circle_progress)
+            if num_points >= 2:
+                theta = np.linspace(0, 2*np.pi * circle_progress, num_points)
+                x = r[circle_idx] * np.cos(theta)
+                y = r[circle_idx] * np.sin(theta)
+                z = np.zeros_like(theta)
+                
+                color = pct_color(vals[circle_idx])
+                alpha = 0.95
+                lw = 2.8
+                
+                line = ax.plot(x, y, z, color=color, alpha=alpha, lw=lw)[0]
+                lines.append(line)
+                
+                # Glow effect
+                line_glow = ax.plot(x, y, z, color=color, alpha=0.3, lw=6.0)[0]
+                lines.append(line_glow)
+            
+            # نمایش متن در مرکز و تاریخ در پایین
+            if circle_progress > 0.7:
+                text_alpha = (circle_progress - 0.7) / 0.3
+                main_text.set_text(f"{vals[circle_idx]:.1f}%")
+                main_text.set_color(pct_color(vals[circle_idx]))
+                main_text.set_alpha(text_alpha * 0.8)
+                date_text.set_text(labels[circle_idx])
+                date_text.set_alpha(text_alpha * 0.7)
+            elif frame < FRAMES_PER_CIRCLE * 0.3:
+                fade = 1 - (frame % FRAMES_PER_CIRCLE) / (FRAMES_PER_CIRCLE * 0.3)
+                main_text.set_alpha(fade * 0.8)
+                date_text.set_alpha(fade * 0.7)
+            else:
+                main_text.set_alpha(0)
+                date_text.set_alpha(0)
+        
+    elif frame < PHASE1_FRAMES + PHASE2_FRAMES:
+        # PHASE 2: Transform to 3D cylinder
+        phase_progress = (frame - PHASE1_FRAMES) / PHASE2_FRAMES
+        t = ease_in_out(phase_progress)
+        
+        z_spacing = 0.1 * t
+        elev = 90 - (45 * t)
+        azim = -90 + (15 * t)
+        
+        for i in range(n):
+            theta = np.linspace(0, 2*np.pi, 200)
+            x = r[i] * np.cos(theta)
+            y = r[i] * np.sin(theta)
+            z = np.full_like(theta, i * z_spacing)
+            
+            color = pct_color(vals[i])
+            alpha = 0.75 - (i * 0.01)
+            alpha = max(alpha, 0.3)
+            lw = 2.2
+            
+            line = ax.plot(x, y, z, color=color, alpha=alpha, lw=lw)[0]
+            lines.append(line)
+        
+        # Fade out text
+        main_text.set_alpha(0.8 * (1 - t))
+        date_text.set_alpha(0.7 * (1 - t))
+        
+    elif frame < PHASE1_FRAMES + PHASE2_FRAMES + PHASE3_FRAMES:
+        # PHASE 3: Rotate to side view
+        phase_progress = (frame - PHASE1_FRAMES - PHASE2_FRAMES) / PHASE3_FRAMES
+        t = ease_in_out(phase_progress)
+        
+        z_spacing = 0.1
+        elev = 45 - (45 * t)
+        azim = -75 + (75 * t)
+        
+        for i in range(n):
+            theta = np.linspace(0, 2*np.pi, 200)
+            x = r[i] * np.cos(theta)
+            y = r[i] * np.sin(theta)
+            z = np.full_like(theta, i * z_spacing)
+            
+            color = pct_color(vals[i])
+            alpha = 0.85
+            lw = 2.5
+            
+            line = ax.plot(x, y, z, color=color, alpha=alpha, lw=lw)[0]
+            lines.append(line)
+        
+        # Add date labels in side view
+        if t > 0.4:
+            label_alpha = min(1.0, (t - 0.4) / 0.3)
+            for i in range(0, n, 2):
+                txt = ax.text(1.5, 0, i * z_spacing, labels[i],
+                            color="#aaaaaa", fontsize=7, alpha=label_alpha * 0.85,
+                            ha='left')
+                date_labels_3d.append(txt)
+        
+        main_text.set_alpha(0)
+        date_text.set_alpha(0)
+        
     else:
-        draw_progress = 1.0  # Fully drawn, holding
-    
-    # Number of points to draw for clockwise animation
-    num_points = 1000
-    theta_full = np.linspace(0, 2*np.pi, num_points)
-    points_to_draw = int(num_points * draw_progress)
-    
-    # Clear all lines
-    for ln, glow in zip(trail_lines, glow_lines):
-        ln.set_data([], [])
-        ln.set_alpha(0.0)
-        glow.set_data([], [])
-        glow.set_alpha(0.0)
-    
-    # Calculate which previous circles to show
-    start = max(0, i - TRAIL + 1)
-    recent = list(range(start, i + 1))
-    denom = max(1, len(recent) - 1)
-    
-    for k, j in enumerate(recent):
-        if j < i:
-            # Previous circles - fully drawn with fade
-            theta = theta_full
-            wiggle = 0.003 * np.sin(theta * 5 + frame * 0.1)
-            rr = np.full_like(theta, r[j]) + wiggle
-        else:
-            # Current circle - drawing clockwise
-            if points_to_draw < 2:
-                continue
-            theta = theta_full[:points_to_draw]
-            wiggle = 0.003 * np.sin(theta * 5 + frame * 0.1)
-            rr = np.full(len(theta), r[j]) + wiggle
+        # HOLD final view
+        z_spacing = 0.1
+        elev = 0
+        azim = 0
         
-        color = pct_color(vals[j])
+        for i in range(n):
+            theta = np.linspace(0, 2*np.pi, 200)
+            x = r[i] * np.cos(theta)
+            y = r[i] * np.sin(theta)
+            z = np.full_like(theta, i * z_spacing)
+            
+            color = pct_color(vals[i])
+            alpha = 0.85
+            lw = 2.5
+            
+            line = ax.plot(x, y, z, color=color, alpha=alpha, lw=lw)[0]
+            lines.append(line)
         
-        # Fade based on position in trail
-        if j < i:
-            fade = lerp(0.15, 0.65, k / denom)
-            line_width = 1.3
-            glow_width = 4.0
-        else:
-            # Current circle - brighter
-            fade = 0.95
-            line_width = 2.5
-            glow_width = 6.0
+        # Show date labels
+        for i in range(0, n, 2):
+            txt = ax.text(1.5, 0, i * z_spacing, labels[i],
+                        color="#aaaaaa", fontsize=7, alpha=0.85, ha='left')
+            date_labels_3d.append(txt)
         
-        # Glow layer
-        glow = glow_lines[k]
-        glow.set_data(theta, rr)
-        glow.set_color(color)
-        glow.set_alpha(fade * 0.2)
-        glow.set_linewidth(glow_width)
-        
-        # Main line
-        ln = trail_lines[k]
-        ln.set_data(theta, rr)
-        ln.set_color(color)
-        ln.set_alpha(fade)
-        ln.set_linewidth(line_width)
+        main_text.set_alpha(0)
+        date_text.set_alpha(0)
     
-    # Smooth text transitions
-    if item_frame < 10:
-        alpha = item_frame / 10
-        main_text.set_alpha(alpha * 0.95)
-        status_text.set_alpha(alpha * 0.9)
-        date_text.set_alpha(alpha * 0.9)
+    # Update view smoothly
+    ax.view_init(elev=elev, azim=azim)
     
-    main_text.set_text(f"{vals[i]:.2f}%")
-    main_text.set_color(pct_color(vals[i]))
-    date_text.set_text(labels[i])
-    
-    stat, stat_color = get_status(vals[i])
-    status_text.set_text(stat)
-    status_text.set_color(stat_color)
-    
-    return (trail_lines + glow_lines + 
-            [title_text, subtitle_text, main_text, date_text, status_text])
+    return lines + date_labels_3d + [title_text, subtitle_text, main_text, date_text]
 
 # ---------- SAVE ----------
-anim = FuncAnimation(fig, update, frames=total_frames, init_func=init, blit=True)
-anim.save(OUT_MP4, writer=FFMpegWriter(fps=FPS, bitrate=4000))
-print(f"✓ Premium clockwise animation saved: {OUT_MP4}")
+anim = FuncAnimation(fig, update, frames=total_frames, init_func=init, interval=1000/FPS, blit=False)
+anim.save(OUT_MP4, writer=FFMpegWriter(fps=FPS, bitrate=5000))
+print(f"✓ Premium 3D transformation animation saved: {OUT_MP4}")
 plt.close()
